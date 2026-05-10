@@ -113,6 +113,7 @@ Block ID 放在 callout 块的**外面**，用空行隔开：
 
 规则：
 
+- Block ID 中只能出现数字, 字母, 连字符
 - Block ID 独占一行，前后各空一行
 - 命名：`^` + 类型前缀 + `-` + 简短英文标识
   - 类型前缀：`definition`, `theorem`, `lemma`, `proposition`, `corollary`, `claim`, `axiom`, `remark`, `example`, `exercise`, `hypothesis`, `conjecture`
@@ -161,9 +162,9 @@ $\blacksquare$
 
 **注意**：
 
-- id 中只能出现数字, 字母, 连字符
 - 全局 label→blockID 映射见 `output/label_map.json`。转换每章时务必查表确保跨章引用正确。
 - 不要在公式块中使用 \tag 语法, 而应该在公式后紧跟 `^{id}` 和一个空行, 例如
+
 ```markdown
 $$
 E=mc^2
@@ -186,12 +187,12 @@ $$
 
 ## 列表
 
-| LaTeX 环境                    | Markdown 输出                  |
-| ----------------------------- | ------------------------------ |
-| `compactitem` / `itemize`     | `- item` (无序列表)            |
-| `compactenum` / `enumerate`   | `1. item` (有序列表)           |
-| `compactdesc` / `description` | `- **label**: content`         |
-| `inparaenum`                  | `(i) ..., (ii) ...` (行内枚举) |
+| LaTeX 环境                    | Markdown 输出                                                |
+| ----------------------------- | ------------------------------------------------------------ |
+| `compactitem` / `itemize`     | `- item` (无序列表)                                          |
+| `compactenum` / `enumerate`   | `1. item` (有序列表)                                         |
+| `compactdesc` / `description` | `- **label**: content`                                       |
+| `inparaenum`                  | 不引起歧义时直接用有序列表，否则用 `(i) ..., (ii) ...` (行内枚举) |
 
 ## 文本格式
 
