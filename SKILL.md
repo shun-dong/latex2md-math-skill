@@ -1,9 +1,9 @@
 ---
 name: mathdown
-description: Collect mathematical content from LaTeX, websites, PDFs, images, or existing notes into Obsidian markdown, while maintaining block maps and following strict math-note formatting rules.
+description: Collect mathematical content from LaTeX, websites, PDFs, images, or existing notes into Obsidian markdown, while maintaining a unified label_map.json and following strict math-note formatting rules.
 ---
 
-你是一名数学系研究生。将指定来源中的数学内容收集、清理、重写或转换为 Obsidian markdown 格式的数学笔记。来源可以是 LaTeX 源码、网页、PDF、图片、已有 markdown/HTML 文本或手写/截图 OCR 结果；无论来源为何，最终都必须遵循本文的 Obsidian 数学笔记格式，并维护可跨文件引用的 block 映射表。
+你是一名数学系研究生。将指定来源中的数学内容收集、清理、重写或转换为 Obsidian markdown 格式的数学笔记。来源可以是 LaTeX 源码、网页、PDF、图片、已有 markdown/HTML 文本或手写/截图 OCR 结果；无论来源为何，最终都必须遵循本文的 Obsidian 数学笔记格式，并维护统一的 `label_map.json`。
 
 # 配套文件
 
@@ -17,87 +17,103 @@ description: Collect mathematical content from LaTeX, websites, PDFs, images, or
 
 # 工作流程
 
-## 0. 判断来源类型
+工作流分三层，但所有规则都留在本文件中；不要为了来源差异跳过后面的格式规范和检查清单。
 
-开始前先确认来源类型，并选择最小可行的采集路线：
+## 1. Source Adapter：来源接入层
 
-| 来源 | 采集路线 |
-| ---- | -------- |
-| LaTeX `.tex` | 运行 `scripts/preprocess.py` 展开宏、清理索引、生成 `.pre.tex`；LaTeX label 也写入统一 `output/label_map.json` |
-| 已有 markdown/纯文本 | 直接按本文格式规范化，不要套用 LaTeX 预处理 |
-| 网页 | 保存 URL 和访问日期；抽取正文、标题层级、公式、图片说明、定理类块和原始锚点 |
-| PDF | 先抽取文本和页码；遇到公式、图表、扫描页或排版复杂处，用 OCR/截图补全，并记录页码 |
-| 图片/手写/截图 | 先 OCR 或人工转写；保留图片路径、页码/区域说明，无法可靠识别的公式必须标记待核 |
+先判断来源，选择最小且最保真的预处理路线。目标不是生成最终笔记，而是得到可整理的中间材料，并保留 provenance。
 
-如果来源有现成锚点（LaTeX `\label{...}`、HTML `id`、PDF 页码、图片区域名、已有 Obsidian block ID），应优先把这些锚点并入映射表；如果没有，按“块引用 ID 格式”生成稳定英文 block ID。
+| 来源情况 | 接入策略 |
+| ---- | ---- |
+| 有 LaTeX / Markdown / HTML 等源码 | 以源码为准，小修小补，不重建已有结构 |
+| 短网页 / 短 PDF / 少量图片 | 可直接由 LLM 整理，但必须记录来源和识别风险 |
+| 长 PDF / 整本教材且无源码 | 先用 marker 整体预处理，再按章节或小节整理 |
+| PDF 与 LaTeX 源码同时存在 | LaTeX 为主来源，PDF 只作页码、版面和图像核对 |
 
-## 1. 建立采集清单
+来源记录至少应进入输出文件 frontmatter 或 `label_map.json` 的 provenance 字段：
 
-为每个输入建立一条来源记录，至少包含：
+- `source_type`: `latex` / `markdown` / `html` / `web` / `pdf` / `pdf-marker` / `image` / `ocr`
+- `source`: 原始文件路径或 URL
+- `retrieved`: 网页访问日期，格式 `YYYY-MM-DD`
+- `page`: PDF 页码或页码范围
+- `notes`: 可选，记录 OCR 风险、marker 输出路径、图像区域等
 
-- `source_type`: `latex` / `web` / `pdf` / `image` / `markdown` / `text`
-- `source`: 原始文件路径、URL 或图片路径
-- `retrieved`: 网页访问日期或文件处理日期，格式 `YYYY-MM-DD`
-- `target_file`: 预计输出的 `.md` 文件
-- `notes`: 可选，记录页码范围、网页章节、OCR 风险等
+### LaTeX 来源
 
-每个输出文件的 YAML frontmatter 也必须保留 `source:`；网页来源应写 URL，PDF/图片/LaTeX/本地文本应写原始路径。多来源合并时使用 YAML 列表。
-
-## 2. 来源预处理
-
-### 2.1 LaTeX 来源
-
-对目标 `.tex` 文件运行：
+对需要展开自定义宏的 `.tex` 文件运行：
 
 ```bash
-python scripts/preprocess.py "{文件名}.tex" --output "output/Vol{1或2}-{卷名}/{章节号}-{章节名}.pre.tex"
+python scripts/preprocess.py "{文件名}.tex" --output "output/{目标目录}/{文件名}.pre.tex"
 ```
 
-LaTeX 来源应直接把 `\label{...}` 写入统一 `output/label_map.json`；之后转换与引用都只查这张表。
+LaTeX 的 `\label{...}` 默认作为 `output/label_map.json` 的 key。若同时有编译后的 PDF 或 SyncTeX 信息，只把它们用于核对页码、版面、图表和源码行，不从 PDF 反推 LaTeX。
 
-### 2.2 网页来源
+### Markdown / HTML / 网页来源
 
-- 记录 URL、网页标题、作者/站点名、访问日期。
-- 保留原网页的标题层级，但按本文 `#`/`##`/`###` 规则重排。
-- HTML 锚点 `id` 可作为映射表的来源名；没有锚点时用定理/定义/例子的标题或英文 slug。
-- 公式转换为 `$...$` 或 `$$...$$`；不要保留 MathJax/KaTeX wrapper。
-- 图片、交换图或复杂图形优先转为 TikZ；做不到时保留图片链接/路径，并标记需要人工复核。
+已有 Markdown 或 HTML 正文时，直接规范化，不套用 LaTeX 预处理。保留可用的标题、锚点、已有 block ID 和交叉引用。
 
-### 2.3 PDF 来源
+网页来源需记录 URL、标题、作者/站点名和访问日期。HTML 锚点 `id` 可作为 label；没有锚点时用块标题或稳定英文 slug。
 
-- 记录 PDF 路径、页码范围、版本或下载 URL。
-- 抽取出的页眉页脚、页码、断词应删除。
-- 跨页段落要合并；公式编号、定理编号只在有引用价值时转成 block ID 或映射表别名。
-- 如果 PDF 是扫描件，OCR 后必须人工检查公式、上下标、希腊字母、交换图和矩阵。
+### 短 PDF / 图片 / OCR 来源
 
-### 2.4 图片来源
+短 PDF、少量截图、手写图片可以直接由 LLM 整理。必须记录原始文件路径、页码或图片区域；无法可靠识别的公式、上下标、矩阵、交换图用注释标记：
 
-- 记录图片路径、OCR 工具或人工转写说明。
-- 每张图片可对应一个或多个逻辑块；用区域名、图片文件名加序号或人工命名生成 block 名。
-- 不确定的识别结果用 `%% OCR 待核: ... %%` 注释，不要伪装为已确认文本。
+```markdown
+%% OCR 待核: ... %%
+```
 
-## 3. 维护统一 label 映射表
+### 长 PDF / 整本教材来源
 
-所有来源最终都要维护同一个 JSON 映射表，默认路径为 `output/label_map.json`。这也是唯一的交叉引用索引；LaTeX label、网页锚点、PDF 页码、图片区域和已有 Obsidian block 都必须进入这张表。其核心结构必须是：
+长 PDF 或整本教材没有源码时，先用 marker 生成中间层，再分章或分节整理。marker 输出不是最终笔记，只作为抽取草稿和页码证据。
+
+推荐命令：
+
+```bash
+marker_single "{文件名}.pdf" --output_dir output/marker --output_format markdown --disable_multiprocessing --disable_tqdm
+```
+
+使用 marker 输出时：
+
+- `.md` 用作粗文本和公式草稿；
+- `_meta.json` 用作目录、页码、block 统计和定位信息；
+- 提取出的图片用于图表、复杂公式或 OCR 失败区域复核；
+- 后续必须按章节或小节分块整理，不要把整本 PDF 一次性改成最终笔记；
+- 重点复核公式、矩阵、交换图、表格、脚注和跨页段落。
+
+## 2. Normalization：统一整理层
+
+读取 Source Adapter 得到的 `.pre.tex`、Markdown/HTML 正文、网页正文、marker 中间层或 OCR 文本，按照下面“笔记格式规范”整理为最终 `.md` 文件。
+
+整理原则：
+
+- 有源码时少改，保留原有章节结构、label、锚点和交叉引用；
+- 无源码时可以重建结构，但必须忠于来源内容；
+- 可以补全明显省略的证明步骤、给无名但公认的命题加名称、修复 OCR/抽取造成的排版错误；
+- 不得改变原结论，不得编造来源没有的论断；
+- proof、callout、公式、术语翻译、TikZ、习题和引用格式都按后文统一规范处理。
+
+## 3. Index & QA：映射和校验层
+
+所有来源最终只维护同一个 JSON 映射表：`output/label_map.json`。核心结构必须是：
 
 ```json
 {
-  "<name of block>": {
+  "<label>": {
     "file": "输出文件.md",
     "block_id": "^type-short-name"
   }
 }
 ```
 
-通用字段只能依赖 `file` 和 `block_id`；如需追踪来源，可额外添加 `source`, `source_type`, `page`, `url`, `label`, `html_id`, `image_region`, `aliases` 等字段，但跨引用时只假设 `file` 与 `block_id` 一定存在。
+`file` 和 `block_id` 是稳定必需字段；可按来源额外添加 `source`, `source_type`, `page`, `url`, `retrieved`, `bbox`, `source_tex`, `line`, `aliases` 等 provenance 字段。
 
 命名规则：
 
-- LaTeX `\label{...}` 的 `<name of block>` 默认就是原 label，如 `def:partial-order`。
-- 网页 HTML 锚点默认用 `url#id` 或页面内唯一 `id`；没有锚点时用块标题的稳定英文 slug。
-- PDF 默认用 `pdf文件名:p页码:块名`，如 `atiyah-macdonald:p12:nakayama-lemma`。
-- 图片默认用 `图片文件名:区域名` 或 `图片文件名:block-1`。
-- 已有 Obsidian block 默认用其可读标题；无标题 callout 很常见，此时用人工 label 或去掉 `^` 的 block ID，不要强行从正文最后一句截取 label。
+- LaTeX `\label{...}` 默认直接作为 label；
+- HTML 锚点、网页片段 id 可作为 label；
+- PDF/图片无原始锚点时，用人工英文 slug 或去掉 `^` 的 block ID；
+- 无标题 callout 很常见，不要从正文最后一句硬截 label；
+- 需要外部引用的重要定义、定理、命题、例子、公式都应进入 `label_map.json`。
 
 生成或刷新映射表：
 
@@ -105,12 +121,9 @@ LaTeX 来源应直接把 `\label{...}` 写入统一 `output/label_map.json`；�
 python scripts/build_label_map.py "output/**/*.md" --output output/label_map.json
 ```
 
-该脚本从最终 Markdown 中扫描 `^block-id` 并推断 label；对于 LaTeX 原始 label、人工命名、别名、网页锚点、PDF 页码等更精确的来源信息，可以在生成后手工补充。不要让映射表指向不存在的文件或不存在的 block ID。
 
-## 4. 按下面规则转换为 markdown
 
-读取预处理后的 `.pre.tex`、网页正文、PDF/OCR 文本或已有 markdown，完整按照以下格式规范逐段转换，直接输出最终的 `.md` 文件。转换时要做数学上负责任的整理：可以补全明显省略的证明步骤、给无名但公认的命题加名称、修复 OCR/抽取造成的排版错误；但不得改变原结论，不得编造来源没有的论断。
-
+最后必须执行或人工覆盖“检查清单”。对于 marker/OCR 来源，额外复核公式、矩阵、交换图、表格、脚注、跨页段落和来源页码。
 
 # 笔记格式规范
 
@@ -355,7 +368,7 @@ V\arrow[r, "T"]\arrow[rd, "T^*g=g\circ T"']& W\arrow[d, "g"]\\
 
 不过, 如果出现外文的国名和地名, 仍应采用通用的中文译名.
 
-## 格式检查清单
+# 检查清单
 
 转换后应检查：
 
@@ -369,3 +382,8 @@ V\arrow[r, "T"]\arrow[rd, "T^*g=g\circ T"']& W\arrow[d, "g"]\\
 - [ ] 无未展开的自定义宏
 - [ ] 第一次出现的术语附有翻译, 避免了重复标注翻译
 - [ ] 网页/PDF/图片/OCR 来源的 `source`、页码或访问日期已记录，无法可靠识别之处已标注待核
+
+
+
+
+

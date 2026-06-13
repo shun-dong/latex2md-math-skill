@@ -3,7 +3,7 @@
 Preprocessor for LaTeX chapters of 代数学方法.
 Expands custom macros, removes indexing commands, normalizes basic structures.
 
-Usage: python preprocess.py <input.tex> [--output <output.tex>]
+Usage: python preprocess.py <input.tex> [--output <output.tex>] [--project-root <dir>]
 """
 
 import re
@@ -12,7 +12,8 @@ import os
 import json
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).parent.parent
+SKILL_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path.cwd().resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +463,7 @@ def process_all(macros, dry_run=False):
 
             out_path = vol['output'] / f'{md_name}.tex'
             if not dry_run:
+                out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_text(processed, encoding='utf-8')
                 print(f"    Wrote: {out_path}")
 
@@ -475,9 +477,13 @@ if __name__ == '__main__':
     parser.add_argument('--dry-run', action='store_true', help='Validate without writing')
     parser.add_argument('--build-labels', action='store_true', help='Build label_map.json')
     parser.add_argument('--show-macros', action='store_true', help='Show parsed macro count')
+    parser.add_argument('--project-root', help='Project root containing AlJabr-1/AlJabr-2 and output; defaults to the current working directory')
 
     args = parser.parse_args()
 
+    PROJECT_ROOT = Path(args.project_root).resolve() if args.project_root else Path.cwd().resolve()
+
+    print(f"Project root: {PROJECT_ROOT}")
     print("Loading macros from mycommand.sty...")
     macros = load_macros()
 
@@ -492,6 +498,7 @@ if __name__ == '__main__':
         print("Building label map...")
         label_map = build_label_map()
         out_path = PROJECT_ROOT / 'output' / 'label_map.json'
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(label_map, ensure_ascii=False, indent=2), encoding='utf-8')
         print(f"Wrote {len(label_map)} labels to {out_path}")
         sys.exit(0)
@@ -510,3 +517,4 @@ if __name__ == '__main__':
             print(processed)
     else:
         parser.print_help()
+
